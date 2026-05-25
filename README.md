@@ -158,6 +158,25 @@ Azure Automation executes your PowerShell script (`Disable-StaleGuests.ps1`) on 
 
 ### Execution Flow
 
+```mermaid
+sequenceDiagram
+    participant Schedule as Daily Schedule
+    participant AA as Azure Automation
+    participant MI as Managed Identity
+    participant Graph as Microsoft Graph API
+    participant Entra as Entra ID
+
+    Schedule->>AA: Triggers runbook
+    AA->>MI: Authenticates (no credentials stored)
+    MI->>Graph: OAuth2 token (app-only)
+    AA->>Graph: GET /users (filter guests)
+    Graph-->>AA: Returns guests with signInActivity
+    AA->>AA: Filters inactive > threshold
+    AA->>Graph: PATCH /users/{id} accountEnabled=false
+    Graph->>Entra: User disabled
+    Entra->>Entra: Dynamic group re-evaluates
+```
+
 1. **Schedule triggers** the runbook daily (e.g., 02:00 AM)
 2. **Managed Identity authenticates** to Microsoft Graph (no stored credentials)
 3. **Script queries** guest users with stale `signInActivity`
