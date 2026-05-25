@@ -151,3 +151,43 @@ Entra-GuestLifecycle-POC/
 - The runbook uses batch processing with throttle handling for 50k+ users
 - Always test with `-WhatIf` before production execution
 - CA policy deploys in Report-Only mode — switch to Enabled after validation
+
+## How Azure Automation Runbooks Work
+
+Azure Automation executes your PowerShell script (`Disable-StaleGuests.ps1`) on a schedule in Azure's serverless infrastructure — no VM, no Logic App, no local machine required.
+
+### Execution Flow
+
+1. **Schedule triggers** the runbook daily (e.g., 02:00 AM)
+2. **Managed Identity authenticates** to Microsoft Graph (no stored credentials)
+3. **Script queries** guest users with stale `signInActivity`
+4. **Script disables** inactive accounts (`accountEnabled = false`)
+5. **Dynamic group auto-updates** → CA policy blocks access
+
+### Key Benefits Over Alternatives
+
+| Traditional Approach | Azure Automation |
+|---|---|
+| Logic App ($$$ per action) | Free tier: 500 min/month included |
+| Stored credentials/secrets | Managed Identity (auto-rotated, no secrets) |
+| Always-on VM + Task Scheduler | Serverless — runs only when triggered |
+| Manual intervention | Fully automated with audit trail |
+
+### Authentication Difference
+
+```powershell
+# Azure Automation (Managed Identity — no credentials needed):
+Connect-MgGraph -Identity -NoWelcome
+
+# Interactive/local testing (prompts for login):
+Connect-MgGraph -Scopes "User.ReadWrite.All" -NoWelcome
+```
+
+### Cost
+
+| Component | Monthly Cost |
+|---|---|
+| Free tier | 500 min/month included |
+| This POC (~15-20 min/day) | ~$0–$0.20 overage |
+| Managed Identity | Free |
+| **Total** | **~$0–$1/month** |
