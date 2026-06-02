@@ -41,7 +41,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [ValidateRange(1, 3650)]
-    [int]$InactivityDays = 30,
+    [int]$InactivityDays = 365,
 
     [Parameter()]
     [switch]$WhatIf,
@@ -214,7 +214,14 @@ foreach ($guest in $staleGuests) {
 
     while (-not $success -and $retryCount -le $MaxRetries) {
         try {
-            $body = @{ accountEnabled = $false } | ConvertTo-Json
+            # Disable account and stamp disable date for grace period tracking
+            $disableDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            $body = @{
+                accountEnabled = $false
+                onPremisesExtensionAttributes = @{
+                    extensionAttribute1 = $disableDate
+                }
+            } | ConvertTo-Json -Depth 3
             Invoke-MgGraphRequest -Method PATCH `
                 -Uri "https://graph.microsoft.com/v1.0/users/$($guest.Id)" `
                 -Body $body `
