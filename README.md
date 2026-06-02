@@ -34,6 +34,85 @@ flowchart TD
     REDEP --> DIS
 ```
 
+## Guest Lifecycle with Entitlement Management & Access Reviews
+
+This POC extends beyond stale-guest disablement to implement a **full governed lifecycle** using Entra ID Governance features:
+
+```mermaid
+flowchart LR
+    A[1. Invitation via<br/>Access Package] --> B[2. Active Period<br/>+ Quarterly Reviews]
+    B --> C[3. 1-Year Inactivity<br/>→ Auto-Disable]
+    C --> D[4. 60-Day Grace Period<br/>Sponsor Notified]
+    D -->|Sponsor Reactivates| B
+    D -->|No Action| E[Cleanup:<br/>Revoke & Remove]
+```
+
+### Lifecycle Requirements
+
+| # | Requirement | How It's Implemented |
+|---|---|---|
+| 1 | **Initial invitation through Entitlement Management** — establishes guest access with defined scope and permissions | Access Package in "External Collaboration" catalog. Connected Organization sponsors approve requests. Guest is added to `SG-Guests-Active` group upon approval. |
+| 2 | **Regular access reviews** — ensure continued business need and appropriate permissions | Quarterly Access Reviews configured on the assignment policy AND as a standalone review. Sponsors review their guests; auto-deny if no response. Sign-in activity recommendations enabled. |
+| 3 | **Automated disablement after 1 year of inactivity** — reduces security risk while preserving account data | `Disable-StaleGuests.ps1` runs daily with 365-day threshold. Disables account + stamps `extensionAttribute1` with ISO 8601 date. Dynamic group + CA policy blocks access immediately. |
+| 4 | **60-day grace period** — allows sponsors to reactivate accounts before permanent data cleanup | `Remove-ExpiredGuests.ps1` runs weekly. Notifies sponsors at day 45. At day 60+: revokes access packages, removes group memberships. `Invoke-GuestReactivation.ps1` enables sponsor-initiated recovery. |
+
+### Entitlement Management Setup
+
+The Access Package provides **governed onboarding** that replaces ad-hoc B2B invitations:
+
+- **Catalog**: "External Collaboration" — groups all external access packages
+- **Access Package**: "Guest Access - Standard" — requestable via MyAccess portal
+- **Approval**: Connected Organization internal sponsors (first stage, 14-day timeout)
+- **Reviews**: Quarterly, sponsors as reviewers, auto-deny on no response
+- **Expiration**: None (inactivity-based disablement is the enforcement mechanism, not time-based expiration)
+
+```powershell
+# Set up Entitlement Management
+.\scripts\entitlement-management\New-GuestAccessPackage.ps1 -WhatIf   # Validate
+.\scripts\entitlement-management\New-GuestAccessPackage.ps1            # Execute
+
+# Set up standalone Access Review
+.\scripts\entitlement-management\New-AccessReview.ps1 -WhatIf
+.\scripts\entitlement-management\New-AccessReview.ps1
+```
+
+### Grace Period & Sponsor Reactivation
+
+After disablement, the 60-day grace period provides a safety net:
+
+| Day | Action |
+|---|---|
+| 0 | Guest disabled by `Disable-StaleGuests.ps1` (1-year inactivity) |
+| 0–44 | Sponsor can reactivate at any time via `Invoke-GuestReactivation.ps1` |
+| 45 | Automated email notification sent to sponsor |
+| 60 | `Remove-ExpiredGuests.ps1` revokes access packages + removes groups |
+| 60+ | Account preserved (disabled) unless `-DeleteAccount` flag is used |
+
+```powershell
+# Grace period cleanup (weekly schedule)
+.\scripts\Remove-ExpiredGuests.ps1 -SenderUserId "noreply@contoso.com" -WhatIf
+.\scripts\Remove-ExpiredGuests.ps1 -SenderUserId "noreply@contoso.com"
+
+# Sponsor reactivation (on-demand)
+.\scripts\Invoke-GuestReactivation.ps1 `
+    -GuestUserId "<guest-object-id>" `
+    -SponsorId "<sponsor-object-id>" `
+    -Justification "Active project collaboration" `
+    -RestoreAccessPackage -AccessPackageId "<package-id>"
+```
+
+### Additional Prerequisites for Lifecycle Features
+
+| Requirement | Details |
+|---|---|
+| **License** | Entra ID P2 / Entra ID Governance (for Entitlement Management + Access Reviews) |
+| **Graph Permissions** | Add: `EntitlementManagement.ReadWrite.All`, `AccessReview.ReadWrite.All`, `Mail.Send` |
+| **Connected Organizations** | Configure partner domains in Entra admin center |
+| **Sponsor Assignment** | Set `sponsors` relationship on guest users |
+| **Shared Mailbox** | For notification emails from cleanup runbook |
+
+> 📖 **Full implementation details**: See [docs/entitlement-management-guide.md](docs/entitlement-management-guide.md)
+
 ## Prerequisites
 
 | Requirement | Details |
@@ -135,13 +214,19 @@ Entra-GuestLifecycle-POC/
 ├── README.md                          # This file
 ├── LICENSE                            # MIT License
 ├── docs/
-│   ├── step-by-step-guide.md         # Full portal walkthrough (10 scenarios)
+│   ├── entitlement-management-guide.md # Full lifecycle implementation guide
+│   ├── step-by-step-guide.md          # Portal walkthrough (10 scenarios)
 │   └── testing-checklist.md           # Validation checklist (50 tests)
 └── scripts/
-    ├── Disable-StaleGuests.ps1        # Main automation runbook
+    ├── Disable-StaleGuests.ps1        # Main runbook (365-day inactivity + date stamp)
+    ├── Remove-ExpiredGuests.ps1       # Grace period cleanup (60-day)
+    ├── Invoke-GuestReactivation.ps1   # Sponsor reactivation workflow
     ├── New-DynamicGroup.ps1           # Creates dynamic security group
     ├── New-ConditionalAccessPolicy.ps1 # Creates CA block policy
-    └── Test-GuestLifecycle.ps1        # End-to-end validation script
+    ├── Test-GuestLifecycle.ps1        # End-to-end validation script
+    └── entitlement-management/
+        ├── New-GuestAccessPackage.ps1 # Access Package + catalog setup
+        └── New-AccessReview.ps1       # Quarterly access review setup
 ```
 
 ## Important Notes
